@@ -1,12 +1,17 @@
-from background import GradientBackground
-from PIL import Image, ImageDraw, ImageFont,ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter
 import numpy as np
+from abc import ABC, abstractmethod
+from background import GradientBackground
 from sqlalchemy.orm import sessionmaker
 from database import engine, Task
 from datetime import datetime
+from utils.config import Config
+
 Session = sessionmaker(bind=engine)
+
+
 class Banner:
-    def __init__(self, width, height, background_color_start, background_color_end, gradient_mode, font_path):
+    def __init__(self, width, height, background_color_start, background_color_end, gradient_mode, font_path=Config.FONT_PATH):
         self.width = width
         self.height = height
         self.font_path = font_path
@@ -18,6 +23,20 @@ class Banner:
         self.elements = []
         self.button_position = None
         self.button_margin = 10
+        self.position = None
+        self.size = None
+        self.image = None
+
+    @abstractmethod
+    def setup_elements(self):
+        # 设置特定元素，子类必须实现此方法
+        pass
+
+    def create_background(self):
+        # 此处创建渐变背景
+        gradient_background = GradientBackground(self.width, self.height)
+        return gradient_background.create_linear_gradient(self.background_color_start, self.background_color_end,
+                                                          self.gradient_mode)
 
     def add_text(self, text, position, font_size, color, highlight_text=None, highlight_color='red',
                  button_position=False):
@@ -86,13 +105,12 @@ class Banner:
             else:
                 new_height = self.size
                 new_width = int((self.size / height) * width)
-            # resized_image = self.image.resize(self.size, Image.LANCZOS)
             resized_image = self.image.resize((new_width, new_height), Image.LANCZOS)
             self.background.convert('RGBA')
             # 计算粘贴位置
             box = (self.position[0], self.position[1], self.position[0] + resized_image.width,
                    self.position[1] + resized_image.height)
-            # mask = self.image.getchannel('A')
+
             try:
                 mask = resized_image.getchannel('A')
                 self.background.paste(resized_image, box, mask)
@@ -109,6 +127,28 @@ class Banner:
                    self.position[1] + self.image.height)
             self.background.paste(self.image, box, self.image)
             print('not resize')
+
+    def add_fixed_button(self, button_text, button_position, button_size, font_size, button_color='red',
+                         text_color='white', radius=20):
+        button_font = ImageFont.truetype(self.font_path, font_size)
+        text_width = self.draw.textlength(button_text, font=button_font)
+        max_text_width = button_size[0] - 10  # 减去边距以确保文本适应按钮
+
+        # 检查文本是否适合当前字体大小，如果不适合，则调整字体大小
+        while text_width > max_text_width:
+            font_size -= 1  # 稍微减小字体大小
+            button_font = ImageFont.truetype(self.font_path, font_size)
+            text_width = self.draw.textlength(button_text, font=button_font)
+
+        # 绘制圆角矩形按钮
+        button_rect = [button_position, (button_position[0] + button_size[0], button_position[1] + button_size[1])]
+        self.draw.rounded_rectangle(button_rect, radius=radius, fill=button_color)  # 可以调整radius来改变圆角
+
+        # 计算并调整文本位置以居中
+        text_position = (button_position[0] + (button_size[0] - text_width) / 2,
+                         button_position[1] + (button_size[1] - font_size) / 2)
+        self.draw.text(text_position, button_text, font=button_font, fill=text_color)
+
     def apply_partial_blur(self, mask_path, blur_radius, position, size):
         """
         Apply a Gaussian blur to a part of the banner based on a mask image.
@@ -134,28 +174,10 @@ class Banner:
         blurred_image = temp_image.filter(ImageFilter.GaussianBlur(blur_radius))
 
         # Paste the blurred part back onto the original background using the same full-sized mask
-        self.background.paste(blurred_image, (0, 0), full_mask)     
-    def add_fixed_button(self, button_text, button_position, button_size, font_size, button_color='red', text_color='white'):
-        button_font = ImageFont.truetype(self.font_path, font_size)
-        text_width = self.draw.textlength(button_text, font=button_font)
-        max_text_width = button_size[0] - 10  # 减去边距以确保文本适应按钮
+        self.background.paste(blurred_image, (0, 0), full_mask)
 
-        # 检查文本是否适合当前字体大小，如果不适合，则调整字体大小
-        while text_width > max_text_width:
-            font_size -= 1  # 稍微减小字体大小
-            button_font = ImageFont.truetype(self.font_path, font_size)
-            text_width = self.draw.textlength(button_text, font=button_font)
-
-        # 绘制圆角矩形按钮
-        button_rect = [button_position, (button_position[0] + button_size[0], button_position[1] + button_size[1])]
-        self.draw.rounded_rectangle(button_rect, radius=20, fill=button_color)  # 可以调整radius来改变圆角
-
-        # 计算并调整文本位置以居中
-        text_position = (button_position[0] + (button_size[0] - text_width) / 2,
-                        button_position[1] + (button_size[1] - font_size) / 2)
-        self.draw.text(text_position, button_text, font=button_font, fill=text_color)
-
-    def add_button_with_custom_corners(self, button_text, button_position, font_size, button_color='red', text_color='white', corners=[1, 1, 1, 1], radius=20, padding=(10, 20, 10, 20)):
+    def add_button_with_custom_corners(self, button_text, button_position, font_size, button_color='red',
+                                       text_color='white', corners=[1, 1, 1, 1], radius=20, padding=(10, 20, 10, 20)):
         button_font = ImageFont.truetype(self.font_path, font_size)
         print(button_font.getbbox(button_text))
         bbox = button_font.getbbox(button_text)
@@ -195,7 +217,8 @@ class Banner:
             button_position[0] + padding[3],
             button_position[1] + padding[0]
         )
-        self.draw.text(text_position, button_text, font=button_font, fill=text_color)    
+        self.draw.text(text_position, button_text, font=button_font, fill=text_color)
+
     def render(self, radius=0):
         """
         Render the image with an optional rounded corner effect.
@@ -224,125 +247,150 @@ class Banner:
         self.background.save(filepath)
 
 
-def create_banner_free(**kwargs):
+class PaymentFiscalManagementBanner(Banner):
+    def __init__(self, **kwargs):
+        super().__init__(702, 196, kwargs.get('background_color_start'), kwargs.get('background_color_end'),
+                         kwargs.get('background_color_gradient', '上到下'), Config.FONT_PATH)
+        self.title = kwargs.get('title', None)
+        self.highlight_text = kwargs.get('highlight_text', None)
+        self.subtitle = kwargs.get('subtitle', None)
+        self.button_text = kwargs.get('button_text', None)
+        self.top_left_text = kwargs.get('top_left_text', None)
+        self.title_font_size = kwargs.get('title_font_size')
+        self.subtitle_font_size = kwargs.get('subtitle_font_size', None)
+        self.button_font_size = kwargs.get('button_font_size', None)
+        self.top_left_button_color = kwargs.get('top_left_button_color', None)
+        self.top_left_button_text_color = kwargs.get('top_left_button_text_color', None)
+        self.button_color = kwargs.get('button_color', None)
+        self.button_text_color = kwargs.get('button_text_color', None)
+        self.output_image = kwargs.get('selected_material_state', None)
+
+    def setup_elements(self):
+        self.add_text(self.title, (24, 53), self.title_font_size, '#3D3D3D', highlight_text=self.highlight_text,
+                      highlight_color='red')
+        self.add_text(self.subtitle, (24, 107), self.subtitle_font_size, '#666666', button_position=True)
+        self.add_fixed_button(self.button_text, (self.button_position, 103), (104, 36), self.button_font_size,
+                              self.button_color, self.button_text_color)
+        self.add_button_with_custom_corners(self.top_left_text, [0, 0], 20, self.top_left_button_color,
+                                            self.top_left_button_text_color, [0, 0, 1, 0], 15, padding=[5, 18, 5, 18])
+        self.add_image(self.output_image, (500, 15), 160)
+
+
+def CreatePaymentFiscalManagementBanner(**kwargs):
     session = Session()
-    # 提取关键参数
-    title = kwargs.get('title',None)
-    highlight_text = kwargs.get('highlight_text',None)
-    subtitle = kwargs.get('subtitle',None)
-    button_text = kwargs.get('button_text',None)
-    top_left_text = kwargs.get('top_left_text',None)
-    background_color_start = kwargs.get('background_color_start',None)
-    background_color_end = kwargs.get('background_color_end',None)
-    background_color_gradient = kwargs.get('background_color_gradient', None)
-    font_path = '方正兰亭中黑简体.TTF'  # 示例字体路径
-    title_font_size = kwargs.get('title_font_size')
-    subtitle_font_size = kwargs.get('subtitle_font_size',None)
-    button_font_size = kwargs.get('button_font_size',None)
-    top_left_font_size = kwargs.get('top_left_font_size',None)
-    top_left_button_color=kwargs.get('top_left_button_color',None)
-    top_left_button_text_color=kwargs.get('top_left_button_text_color',None)
-    button_color = kwargs.get('button_color',None)
-    button_text_color = kwargs.get('button_text_color',None)
+    # 创建 FixedBanner 实例
+    banner = PaymentFiscalManagementBanner(**kwargs)
+    banner.setup_elements()
+
+    # 创建数据库任务记录
     task = Task(
-            #user_id=kwargs.get('request').username,  # 假设已有user_id传入
-            user_id=3,
-            task_type='material_library',
-            input_parameters=str(kwargs),
-            output_image_path=None,
-            image_format='png',
-            service_info='Banner Service',
-            drawing_time=datetime.utcnow(),
-            status='pending'
-        )
-    
+        user_id=3,  # 示例用户 ID
+        task_type='material_library',
+        input_parameters=str(kwargs),
+        output_image_path=None,
+        image_format='png',
+        service_info='Banner Service',
+        drawing_time=datetime.utcnow(),
+        status='pending'
+    )
     session.add(task)
     session.commit()
-    # create banner
-    banner = Banner(702, 196, background_color_start, background_color_end, background_color_gradient,
-                    font_path, )  # 创建一个 Banner 实例
-    banner.add_text(top_left_text, (10, 10), top_left_font_size, 'orange')
-    banner.add_text(title, (30, 50), title_font_size, 'black', highlight_text=highlight_text, highlight_color='red')
-    banner.add_text(subtitle, (30, 120), subtitle_font_size, 'gray', button_position=True)
-    banner.add_button(button_text, (30, 120), subtitle_font_size * len(subtitle), button_font_size, button_color,
-                      button_text_color)
 
-    
-    task.output_image_path = "user/zhanyudong/"+"output_image.png"
+    rendered_banner = banner.render(radius=20)
+    banner.save("output_image.png")
+    # need to add user management
+    task.output_image_path = "output_image.png"
     task.status = 'completed'
-    
-    output_image = kwargs.get('selected_material_state', None)
-    # print(output_image.shape)
-    banner.add_image(output_image, (500, 15), 160)  # 位置假设
-    banner.render()
-    banner.save("user/zhanyudong/"+"output_image.png")
     session.commit()
-    return banner.render(radius=20)
 
-def create_banner_fix(**kwargs):
-    session = Session()
-    # 提取关键参数
-    title = kwargs.get('title',None)
-    highlight_text = kwargs.get('highlight_text',None)
-    subtitle = kwargs.get('subtitle',None)
-    button_text = kwargs.get('button_text',None)
-    top_left_text = kwargs.get('top_left_text',None)
-    top_left_button_color=kwargs.get('top_left_button_color',None)
-    top_left_button_text_color=kwargs.get('top_left_button_text_color',None)
-    background_color_start = kwargs.get('background_color_start',None)
-    background_color_end = kwargs.get('background_color_end',None)
-    background_color_gradient = kwargs.get('background_color_gradient', None)
-    font_path = '方正兰亭中黑简体.TTF'  # 示例字体路径
-    title_font_size = kwargs.get('title_font_size')
-    subtitle_font_size = kwargs.get('subtitle_font_size',None)
-    button_font_size = kwargs.get('button_font_size',None)
-    #top_left_font_size = kwargs.get('top_left_font_size',None)
-    button_color = kwargs.get('button_color',None)
-    button_text_color = kwargs.get('button_text_color',None)
-    
-    task = Task(
-            #user_id=kwargs.get('request').username,  # 假设已有user_id传入
-            user_id=3,
-            task_type='material_library',
-            input_parameters=str(kwargs),
-            output_image_path=None,
-            image_format='png',
-            service_info='Banner Service',
-            drawing_time=datetime.utcnow(),
-            status='pending'
-        )
-    
-    session.add(task)
-    session.commit()
-    # create banner
-    banner = Banner(702, 196, background_color_start, background_color_end, background_color_gradient,
-                    font_path, )  # 创建一个 Banner 实例
-    #banner.add_text(top_left_text, (10, 10), top_left_font_size, 'orange')
-    banner.add_text(title, (24, 53), title_font_size, '#3D3D3D', highlight_text=highlight_text, highlight_color='red')
-    banner.add_text(subtitle, (24, 107), subtitle_font_size, '#666666', button_position=True)
-   # banner.add_button(button_text, (24, 89), subtitle_font_size * len(subtitle), button_font_size, button_color,
-                     # button_text_color)
-    banner.add_fixed_button(button_text,(banner.button_position,103),(104,36),button_font_size,button_color,button_text_color)
-    banner.add_button_with_custom_corners(top_left_text,[0,0],20,top_left_button_color,top_left_button_text_color,[0,0,1,0],15,[5,18,5,18])
-    
-    task.output_image_path = "user/zhanyudong/"+"output_image.png"
-    task.status = 'completed'
-    
-    output_image = kwargs.get('selected_material_state', None)
-    # print(output_image.shape)
-    banner.add_image(output_image, (500, 15), 160)  # 位置假设
-    banner.render()
-    banner.save("user/zhanyudong/"+"output_image.png")
-    session.commit()
-    return banner.render()
+    return rendered_banner
 
-def output_fn_free(*args, **kwargs):
+
+def OutPutFuncCreatePaymentFiscalManagementBanner(*args, **kwargs):
     # 将位置参数转换为关键字参数
     # 假设输入的顺序和名称与 Gradio 接口定义中的顺序和名称一致
     arg_names = [
         "selected_material_state", "title", "title_font_size", "highlight_text", "subtitle",
         "subtitle_font_size", "button_text", "button_font_size", "button_color", "button_text_color",
-        "top_left_text","top_left_font_size", "top_left_button_color","top_left_button_text_color", "background_color_start",
+        "top_left_text", "top_left_button_color", "top_left_button_text_color", "background_color_start",
+        "background_color_end", "background_color_gradient", "auto_adjust_font",
+    ]
+
+    # 更新 kwargs 字典
+    kwargs.update(dict(zip(arg_names, args)))
+
+    # 调用 create_banner 函数
+    banner = CreatePaymentFiscalManagementBanner(**kwargs)
+    return banner
+
+
+class PaymentTabFiscalManagementBanner(Banner):
+    def __init__(self, **kwargs):
+        super().__init__(654, 464, kwargs.get('background_color_start'), kwargs.get('background_color_end'),
+                         kwargs.get('background_color_gradient', '上到下'), Config.FONT_PATH)
+        self.title = kwargs.get('title', None)
+        self.highlight_text = kwargs.get('highlight_text', None)
+        self.subtitle = kwargs.get('subtitle', None)
+        self.button_text = kwargs.get('button_text', None)
+        self.top_left_text = kwargs.get('top_left_text', None)
+        self.title_font_size = kwargs.get('title_font_size', None)
+        self.subtitle_font_size = kwargs.get('subtitle_font_size', None)
+        self.button_font_size = kwargs.get('button_font_size', None)
+        self.top_left_button_color = kwargs.get('top_left_button_color', None)
+        self.top_left_button_text_color = kwargs.get('top_left_button_text_color', None)
+        self.button_color = kwargs.get('button_color', None)
+        self.button_text_color = kwargs.get('button_text_color', None)
+        self.output_image = kwargs.get('selected_material_state', None)
+
+    def setup_elements(self):
+        self.add_text(self.title, (26, 100), self.title_font_size, '#3D3D3D', highlight_text=self.highlight_text,
+                      highlight_color='red')
+        self.add_text(self.subtitle, (26, 168), self.subtitle_font_size, '#242424', button_position=True)
+        self.add_image(self.output_image, (400, 75), 240)
+        self.apply_partial_blur('script/banner/mask.png', 30, [0, int(self.height / 2)], [self.width, int(self.height / 2)])
+        self.add_fixed_button(self.button_text, (26, 350), (600, 80), self.button_font_size,
+                              self.button_color, self.button_text_color)
+        self.add_button_with_custom_corners(self.top_left_text, [0, 0], 20, self.top_left_button_color,
+                                            self.top_left_button_text_color, [0, 0, 1, 0], 20, padding=[6, 24, 7, 24])
+
+
+def CreatePaymentTabFiscalManagementBanner(**kwargs):
+    session = Session()
+    # 创建 FixedBanner 实例
+    banner = PaymentTabFiscalManagementBanner(**kwargs)
+    banner.setup_elements()
+
+    # 创建数据库任务记录
+    task = Task(
+        user_id=3,  # 示例用户 ID，后续需要增加用户管理功能
+        task_type='material_library',
+        input_parameters=str(kwargs),
+        output_image_path=None,
+        image_format='png',
+        service_info='Banner Service',
+        drawing_time=datetime.utcnow(),
+        status='pending'
+    )
+    session.add(task)
+    session.commit()
+
+    rendered_banner = banner.render(radius=20)
+    banner.save("output_image.png")
+
+    task.output_image_path = "output_image.png"
+    task.status = 'completed'
+    session.commit()
+
+    return rendered_banner
+
+
+def OutputFuncCreatePaymentTabFiscalManagementBanner(*args, **kwargs):
+    # 将位置参数转换为关键字参数
+    # 输入的顺序和名称与 Gradio 接口定义中的顺序和名称必须一致
+    arg_names = [
+        "selected_material_state", "title", "title_font_size", "highlight_text", "subtitle",
+        "subtitle_font_size", "button_text", "button_font_size", "button_color", "button_text_color",
+        "top_left_text", "top_left_button_color", "top_left_button_text_color", "background_color_start",
         "background_color_end", "background_color_gradient", "auto_adjust_font",
     ]
 
@@ -351,23 +399,8 @@ def output_fn_free(*args, **kwargs):
     # for key in arg_names:
     # print(f"{key}: {kwargs.get(key)}")
     # 调用 create_banner 函数
-    banner = create_banner_free(**kwargs)
-    return banner
-def output_fn_fix(*args, **kwargs):
-    # 将位置参数转换为关键字参数
-    # 假设输入的顺序和名称与 Gradio 接口定义中的顺序和名称一致
-    arg_names = [
-        "selected_material_state", "title", "title_font_size", "highlight_text", "subtitle",
-        "subtitle_font_size", "button_text", "button_font_size", "button_color", "button_text_color",
-        "top_left_text", "top_left_button_color","top_left_button_text_color","background_color_start",
-        "background_color_end", "background_color_gradient", "auto_adjust_font",
-    ]
-
-    # 更新 kwargs 字典
-    kwargs.update(dict(zip(arg_names, args)))
-    # for key in arg_names:
-    # print(f"{key}: {kwargs.get(key)}")
-    # 调用 create_banner 函数
-    banner = create_banner_fix(**kwargs)
-    return banner
-
+    banner = CreatePaymentTabFiscalManagementBanner(**kwargs)
+    final_banner = Banner(702, 488, 'white', 'white', '上到下', '方正兰亭中黑简体.TTF')
+    final_banner.add_image(banner, [24, 0])
+    final_pic = final_banner.render(radius=15)
+    return final_pic

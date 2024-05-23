@@ -7,7 +7,7 @@ from gradio.oauth import _redirect_to_target, attach_oauth
 from datetime import datetime
 from sqlalchemy.orm import sessionmaker
 from database import engine, Task
-from banner_handler2 import Banner, OutPutFuncCreatePaymentFiscalManagementBanner, \
+from banner_handler import Banner, OutPutFuncCreatePaymentFiscalManagementBanner, \
     OutputFuncCreatePaymentTabFiscalManagementBanner
 from database import authenticate, fetch_user_id
 from chart import plot_daily_usage
@@ -74,8 +74,8 @@ def select_from_gallery(image_url, request: gr.Request):
         return user_image_path
     else:
         # 如果用户不存在或未认证，返回默认素材路径
-        print("素材1.png")
-        return "素材1.png"  # 提供一个默认的素材
+        print("script/banner/素材1.png")
+        return "script/banner/素材1.png"  # 提供一个默认的素材
 
 
 def send_image_to_banner_creator(image, set_image):
